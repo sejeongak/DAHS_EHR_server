@@ -140,7 +140,6 @@ class LongformerPretrainNormal(LongformerPreTrainedModel):
         # layer_norm_eps,
         gpu_mixed_precision=True,
         # ablation=None,
-        args=None,
     ):
         self.vocab_size = vocab_size
         self.itemid_size = itemid_size
@@ -157,7 +156,6 @@ class LongformerPretrainNormal(LongformerPreTrainedModel):
         self.dropout_prob = dropout_prob
         # self.mask_mode = mask_mode
         self.loss_factor = loss_factor
-        self.args = args
         # # self.layer_norm_eps = layer_norm_eps
         self.gpu_mixed_precision = gpu_mixed_precision
         self.use_discriminator = use_discriminator
@@ -207,7 +205,6 @@ class LongformerPretrainNormal(LongformerPreTrainedModel):
             use_itemid=True,
             inputs_embeds=None,
             # ablation=ablation,
-            args=args
         )
         
         self.encoder = LongformerModel(config=self.config)
@@ -387,10 +384,193 @@ class LongformerPretrainNormal(LongformerPreTrainedModel):
             "loss": total_loss,
             "mlm_loss": loss_mlm,
             "value_pred_loss": loss_value,
+            # "discriminator_loss": loss_discriminator,
             "mlm_logits": mlm_output,
+            # "value_logits": value_output,
+            # "discriminator_logits": discriminator_logits,
             "hidden_states": outputs.hidden_states,
             "attentions": outputs.attentions,
         }
+
+
+    
+# class LongformerFinetune(LongformerPretrainNormal):
+    
+#     def __init__(
+#         self,
+#         pretrained_model: LongformerPretrainNormal,
+#         idx2label,
+#         problem_type: str = "single_label_classification",
+#         num_labels: int = 2,
+#         learning_rate: float = 1e-6,
+#         classifier_dropout: float = 0.1,
+#         use_lora: bool = True,
+#         freeze: bool = False,
+#     ):
+#         super().__init__(
+#             idx2label=idx2label,
+#             name_size=pretrained_model.embeddings.name_size,
+#             description_size=pretrained_model.embeddings.description_size,
+#             token_type_size=pretrained_model.embeddings.token_type_size,
+#             vocab_size=pretrained_model.vocab_size,
+#             itemid_size=pretrained_model.itemid_size,
+#             max_position_embeddings=pretrained_model.max_position_embeddings,
+#             unit_size=pretrained_model.unit_size,
+#             task_size=pretrained_model.task_size,
+#             max_age=pretrained_model.max_age,
+#             gender_size=pretrained_model.gender_size,
+#             embedding_size=pretrained_model.embedding_size,
+#             num_hidden_layers=pretrained_model.num_hidden_layers,
+#             num_attention_heads=pretrained_model.num_attention_heads,
+#             intermediate_size=pretrained_model.intermediate_size,
+#             learning_rate=learning_rate,   
+#             dropout_prob=pretrained_model.dropout_prob,
+#             loss_factor=pretrained_model.loss_factor,
+#             use_discriminator=pretrained_model.use_discriminator,
+#             gpu_mixed_precision=pretrained_model.gpu_mixed_precision
+#         )
+#         self.num_labels = num_labels
+#         self.learning_rate = learning_rate
+#         self.classifier_dropout = classifier_dropout
+#         self.test_outputs = []
+#         self.config = pretrained_model.config
+#         self.config.num_labels = self.num_labels
+#         self.config.classifier_dropout = self.classifier_dropout
+#         self.config.problem_type = problem_type
+#         self.config.learning_rate = self.learning_rate
+#         self.freeze = freeze
+        
+#         self.embeddings = pretrained_model.embeddings
+#         if use_lora:
+#             self.model = pretrained_model.model.model.longformer # LoRA
+#         else:
+#             self.model = pretrained_model.model.longformer 
+        
+#         self.classifier = LongformerClassificationHead(self.config)
+        
+        
+
+#         self.classifier.apply(self._init_weights)
+        
+#         if self.freeze:
+#             self._freeze_pretrained_weights()
+#             print("pretrained model freeze!")
+        
+#     def _init_weights(self, module: torch.nn.Module) -> None:
+#         """ Initialize the weights """
+#         if isinstance(module, nn.Linear):
+#             module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
+#             if module.bias is not None:
+#                 module.bias.data.zero_()
+#         elif isinstance(module, nn.Embedding):
+#             module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
+#             if module.padding_idx is not None:
+#                 module.weight.data[module.padding_idx].zero_()
+#         elif isinstance(module, nn.LayerNorm):
+#             module.bias.data.zero_()
+#             module.weight.data.fill_(1.0)
+            
+#     def _freeze_pretrained_weights(self):
+#         """ Freeze all pretrained weights except for the classifier """
+#         for name, param in self.named_parameters():
+#             if "classifier" not in name:  # Freeze everything except the classifier
+#                 param.requires_grad = False
+    
+
+#     # def post_init(self):
+#     #     self.classifier.apply(self._init_weights)
+#     def pretrained_parameters(self):
+#         # Return parameters from the pretrained model only (excluding LoRA and classifier)
+#         return [param for name, param in self.named_parameters() if 'lora' not in name and 'classifier' not in name]
+
+#     def lora_parameters(self):
+#         # Return parameters related to LoRA
+#         return [param for name, param in self.named_parameters() if 'lora' in name]
+
+#     def classifier_parameters(self):
+#         # Return parameters of the classifier
+#         return [param for name, param in self.named_parameters() if 'classifier' in name]
+        
+#     def forward(
+#         self,
+#         input_ids,
+#         value_ids,
+#         unit_ids,
+#         time_ids,
+#         position_ids,
+#         token_type_ids,
+#         ordername_ids,
+#         orderdescription_ids,      
+#         age_ids,
+#         gender_ids,
+#         task_token,
+#         attention_mask=None,
+#         global_attention_mask=None,
+#         # labels=None,
+#         output_attentions=False,
+#         output_hidden_states=False,
+#         return_dict=True,
+#         # criterion=None,
+#     ):
+        
+#         combined_embed = self.embeddings(
+#             input_ids = input_ids,
+#             value_ids = value_ids,
+#             unit_ids = unit_ids,
+#             time_ids = time_ids,
+#             position_ids = position_ids,
+#             token_type_ids = token_type_ids,
+#             ordername_ids = ordername_ids,
+#             orderdescription_ids = orderdescription_ids,
+#             age_ids = age_ids,
+#             gender_ids = gender_ids,
+#             task_ids = task_token
+#         )
+        
+#         if global_attention_mask is None:
+#             global_attention = torch.zeros_like(attention_mask)
+#             global_prefix = torch.ones((attention_mask.shape[0], 3)).to(self.device)
+#             global_attention_mask = torch.cat([global_prefix, global_attention], dim=1)
+        
+#         if attention_mask is None:
+#             attention_mask = torch.ones_like(input_ids)
+#         else:
+#             attention_prefix = torch.ones((attention_mask.shape[0], 3)).to(self.device)
+#             attention_mask = torch.cat([attention_prefix, attention_mask], dim=1)
+            
+#         outputs = self.model(
+#             inputs_embeds=combined_embed,
+#             # position_ids=position_ids,
+#             # token_type_ids=type_ids,
+#             attention_mask=attention_mask, 
+#             global_attention_mask=global_attention_mask,
+#             # labels=labels,
+#             output_attentions=output_attentions,
+#             output_hidden_states=output_hidden_states,
+#             return_dict=return_dict,
+#         )
+        
+#         sequence_output = outputs[0]
+#         logits = self.classifier(sequence_output)
+        
+        
+#         # loss=None
+#         # if criterion:
+#         #     # loss = criterion(logits, labels.float())
+#         #     if self.num_labels > 1:
+#         #         loss = criterion(logits.view(-1, self.num_labels), labels.view(-1))
+#         #     else:
+#         #         loss = criterion(logits, labels.float())
+            
+            
+                
+#         # loss_fct = nn.CrossEntropyLoss()
+#         # loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+#         return {
+#                 # "loss": loss,
+#                 "logits": logits,
+#                 # "sequence_output": sequence_output,
+#                 }
 
 
         
@@ -401,6 +581,7 @@ class Classifier(nn.Module):
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
         self.dropout = nn.Dropout(config.classifier_dropout)
         self.out_proj = nn.Linear(config.hidden_size, config.num_labels)
+        # self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.BatchNorm = nn.BatchNorm1d(config.hidden_size, affine=True, eps=1e-5)
         
         self._init_weights()
@@ -559,7 +740,557 @@ class LongformerFinetune(nn.Module):
         
         return logits
     
+class SimpleClassifier(nn.Module):
+    def __init__(self, config):
+        super(SimpleClassifier, self).__init__()
+        self.linear = nn.Linear(config.hidden_size, config.num_labels)
+        self.dropout = nn.Dropout(config.classifier_dropout)
+        
+        self._init_weights()
+        
+    def _init_weights(self):
+        nn.init.xavier_uniform_(self.linear.weight)
+        if self.linear.bias is not None:
+            nn.init.zeros_(self.linear.bias)
+            
+    def forward(self, x):
+        x = self.dropout(x)
+        x = self.linear(x)
+        return x
     
+class MidClassifier(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.classifier = nn.Sequential(
+            nn.LayerNorm(config.hidden_size),
+            nn.Linear(config.hidden_size, config.hidden_size//2),
+            nn.GELU(),
+            nn.Dropout(config.classifier_dropout),
+            nn.Linear(config.hidden_size//2, config.num_labels)
+        )
+        
+        self._init_weights()
+        
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
+
+    def forward(self, x):
+        return self.classifier(x)
+
+    
+    
+# class MultitaskClassifier(nn.Module):
+#     def __init__(self, config):
+#         super().__init__()
+#         hidden_size = config.hidden_size
+#         dropout = config.classifier_dropout
+#         num_labels = config.num_labels
+
+#         self.linear = nn.Sequential(
+#             nn.LayerNorm(hidden_size),
+#             nn.Linear(hidden_size, hidden_size),
+#             nn.GELU(),
+#             nn.Dropout(dropout),
+#             nn.Linear(hidden_size, num_labels)
+#         )
+
+#         self._init_weights()
+
+#     def _init_weights(self):
+#         for m in self.modules():
+#             if isinstance(m, nn.Linear):
+#                 nn.init.xavier_uniform_(m.weight)
+#                 if m.bias is not None:
+#                     nn.init.zeros_(m.bias)
+
+#     def forward(self, x):
+#         return self.linear(x)
+class OptimizedMultitaskClassifier(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        hidden_size = config.hidden_size
+        num_labels = config.num_labels
+        dropout = config.classifier_dropout
+
+        self.dense1 = nn.Linear(hidden_size, hidden_size * 2)
+        self.dropout1 = nn.Dropout(dropout)
+        self.norm1 = nn.LayerNorm(hidden_size * 2)
+
+        self.dense2 = nn.Linear(hidden_size * 2, hidden_size)
+        self.dropout2 = nn.Dropout(dropout)
+        self.norm2 = nn.LayerNorm(hidden_size)
+
+        self.out_proj = nn.Linear(hidden_size, num_labels)
+
+        self.activation = nn.GELU()
+        self._init_weights()
+
+    def _init_weights(self):
+        for layer in [self.dense1, self.dense2, self.out_proj]:
+            nn.init.xavier_uniform_(layer.weight)
+            if layer.bias is not None:
+                nn.init.zeros_(layer.bias)
+
+    def forward(self, x):
+        x = self.dense1(x)
+        x = self.activation(x)
+        x = self.dropout1(x)
+        x = self.norm1(x)
+
+        x = self.dense2(x)
+        x = self.activation(x)
+        x = self.dropout2(x)
+        x = self.norm2(x)
+
+        logits = self.out_proj(x)
+        return logits
+
+    
+class MultitaskClassifier(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        hidden_size = config.hidden_size
+        num_labels = config.num_labels
+        dropout = config.classifier_dropout
+        
+        self.dense1 = nn.Linear(hidden_size, hidden_size * 2)
+        self.norm1 = nn.LayerNorm(hidden_size * 2)
+        self.dense2 = nn.Linear(hidden_size * 2, hidden_size)
+        self.norm2 = nn.LayerNorm(hidden_size)
+        self.out_proj = nn.Linear(hidden_size, num_labels)
+        self.dropout = nn.Dropout(dropout)
+        
+        self._init_weights()
+        
+    def _init_weights(self):
+        nn.init.xavier_uniform_(self.dense1.weight)  
+        if self.dense1.bias is not None:
+            nn.init.zeros_(self.dense1.bias)
+
+        nn.init.xavier_uniform_(self.dense2.weight)
+        if self.dense2.bias is not None:
+            nn.init.zeros_(self.dense2.bias)
+
+        nn.init.xavier_uniform_(self.out_proj.weight)
+        if self.out_proj.bias is not None:
+            nn.init.constant_(self.out_proj.bias, 0.0)  
+
+    def forward(self, x):
+        x = self.dense1(x)
+        x = self.norm1(x)
+        x = F.leaky_relu(x)
+        x = self.dropout(x)
+
+        x = self.dense2(x)
+        x = self.norm2(x)
+        x = F.leaky_relu(x)
+        x = self.dropout(x)
+
+        logits = self.out_proj(x)
+        return logits
+    
+class SimpleMultitaskClassifier(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        hidden_size = config.hidden_size
+        num_labels = config.num_labels
+        dropout = config.classifier_dropout
+
+        self.classifier = nn.Sequential(
+            nn.LayerNorm(hidden_size),
+            nn.Linear(hidden_size, hidden_size),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size, num_labels)
+        )
+
+        self._init_weights()
+
+    def _init_weights(self):
+        for m in self.classifier:
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
+    def forward(self, x):
+        return self.classifier(x)
+    
+class DeepResidualMultitaskClassifier(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        hidden_size = config.hidden_size
+        num_labels = config.num_labels
+        dropout = config.classifier_dropout
+
+        self.input_norm = nn.LayerNorm(hidden_size)
+        self.dense1 = nn.Linear(hidden_size, hidden_size * 2)
+        self.dropout1 = nn.Dropout(dropout)
+        self.dense2 = nn.Linear(hidden_size * 2, hidden_size)
+        self.dropout2 = nn.Dropout(dropout)
+        self.out_proj = nn.Linear(hidden_size, num_labels)
+
+        self.activation = nn.GELU()  # 또는 F.leaky_relu
+
+        self._init_weights()
+
+    def _init_weights(self):
+        nn.init.xavier_uniform_(self.dense1.weight)
+        nn.init.zeros_(self.dense1.bias)
+        nn.init.xavier_uniform_(self.dense2.weight)
+        nn.init.zeros_(self.dense2.bias)
+        nn.init.xavier_uniform_(self.out_proj.weight)
+        nn.init.constant_(self.out_proj.bias, 0.0)
+
+    def forward(self, x):
+        residual = x
+        x = self.input_norm(x)
+
+        x = self.dense1(x)
+        x = self.activation(x)
+        x = self.dropout1(x)
+
+        x = self.dense2(x)
+        x = self.activation(x)
+        x = self.dropout2(x)
+
+        x = x + residual  # Residual connection
+        return self.out_proj(x)
+    
+class Multitask_Residual_Classifier(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        hidden_size = config.hidden_size
+        num_labels = config.num_labels
+        dropout = config.classifier_dropout
+
+        self.input_norm = nn.LayerNorm(hidden_size)
+
+        self.dense1 = nn.Linear(hidden_size, hidden_size * 2)
+        self.norm1 = nn.LayerNorm(hidden_size * 2)
+        self.dropout1 = nn.Dropout(dropout)
+
+        self.dense2 = nn.Linear(hidden_size * 2, hidden_size)
+        self.norm2 = nn.LayerNorm(hidden_size)
+        self.dropout2 = nn.Dropout(dropout)
+
+        self.out_proj = nn.Linear(hidden_size, num_labels)
+        self.activation = nn.GELU()  # 또는 nn.LeakyReLU()
+
+        self._init_weights()
+
+    def _init_weights(self):
+        for layer in [self.dense1, self.dense2, self.out_proj]:
+            nn.init.xavier_uniform_(layer.weight)
+            if layer.bias is not None:
+                nn.init.zeros_(layer.bias)
+
+    def forward(self, x):
+        residual = x  # for residual connection
+        x = self.input_norm(x)
+
+        x = self.dense1(x)
+        x = self.norm1(x)
+        x = self.activation(x)
+        x = self.dropout1(x)
+
+        x = self.dense2(x)
+        x = self.norm2(x)
+        x = self.activation(x)
+        x = self.dropout2(x)
+
+        x = x + residual  # residual connection
+        return self.out_proj(x)
+
+class SharedMultitaskClassifier(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        hidden_size = config.hidden_size
+        dropout = config.classifier_dropout
+
+        self.classifier = nn.Sequential(
+            nn.LayerNorm(hidden_size),
+            nn.Linear(hidden_size, hidden_size),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size, 1)  # Binary classification
+        )
+        self._init_weights()
+
+    def _init_weights(self):
+        for m in self.classifier:
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
+    def forward(self, x):  # x: (batch, num_tasks, hidden_size)
+        logits = self.classifier(x).squeeze(-1)  # (batch, num_tasks)
+        return logits
+
+
+
+
+# class MultitaskClassifier(nn.Module):
+#     def __init__(self, config):
+#         super().__init__()
+#         hidden_size = config.hidden_size
+#         num_labels = config.num_labels
+#         dropout = config.classifier_dropout
+
+#         self.layer1 = nn.Sequential(
+#             nn.LayerNorm(hidden_size),
+#             nn.Linear(hidden_size, hidden_size * 2),
+#             nn.GELU(),  
+#             nn.Dropout(dropout)
+#         )
+
+#         self.layer2 = nn.Sequential(
+#             nn.LayerNorm(hidden_size * 2),
+#             nn.Linear(hidden_size * 2, hidden_size),
+#             nn.GELU(),
+#             nn.Dropout(dropout)
+#         )
+
+#         self.residual_adapter = nn.Linear(hidden_size, hidden_size)  # for residual scaling
+#         self.out_proj = nn.Linear(hidden_size, num_labels)
+
+#         self._init_weights()
+
+#     def _init_weights(self):
+#         for m in self.modules():
+#             if isinstance(m, nn.Linear):
+#                 nn.init.xavier_uniform_(m.weight)
+#                 if m.bias is not None:
+#                     nn.init.zeros_(m.bias)
+
+#     def forward(self, x):
+#         residual = self.residual_adapter(x)  # optional: can use identity if dim match
+#         x = self.layer1(x)
+#         x = self.layer2(x)
+#         x = x + residual  # residual connection
+#         logits = self.out_proj(x)
+#         return logits
+
+# class onelayer_classifier(nn.Module):
+#     def __init__(self, config):
+#         super().__init__()
+#         self.dropout = nn.Dropout(config.classifier_dropout)
+#         self.dense = nn.Linear(config.hidden_size, config.num_labels)
+
+#     def forward(self, x):
+#         x = self.dropout(x)
+#         logits = self.dense(x)
+#         return logits
+
+
+    
+# class LongformerFinetuneforMultiTask(nn.Module):
+#     def __init__(self, 
+#                  pretrained_model, 
+#                  num_labels, 
+#                  num_tasks=10,
+#                  classifier_dropout=0.1, 
+#                  freeze_pretrained=True, 
+#                  freeze_layers=0,
+#                  ablation=None,
+#                  args=None):
+#         super(LongformerFinetuneforMultiTask, self).__init__()
+#         self.config = pretrained_model.config
+
+#         # 사전 학습된 모델 (pretrained Longformer)
+#         self.embedding = EHREmbedding_finetune(
+#             config=self.config,
+#             itemid_size=args.itemid_size,
+#             unit_size=args.unit_size,
+#             max_age=args.max_age,
+#             max_len=args.max_position_embeddings,
+#             gender_size=args.gender_size,
+#             task_size=args.task_size,
+#             # idx2label=args.idx2label, ###########
+#             # idx2ordername=idx2ordername,
+#             # idx2orderdescription=idx2orderdescription,
+#             name_size=args.name_size,
+#             description_size=args.description_size,
+#             token_type_size=args.token_type_size,
+#             ablation=ablation,
+#             # embedding_tokenizer=embedding_tokenizer,
+#             # embedding_model=embedding_model,
+#             # embedding_map=embedding_map,
+#             use_itemid=True,
+#             inputs_embeds=None,
+#         )
+#         self.encoder = pretrained_model.encoder
+#         self.num_labels = num_labels
+#         self.num_tasks = num_tasks
+        
+#         for param in self.encoder.embeddings.parameters():
+#             param.requires_grad = False
+        
+#         if hasattr(self.encoder, "pooler"):
+#             self.encoder.pooler = None
+    
+
+#         if freeze_pretrained:
+#             for name, param in self.embedding.named_parameters():
+#                 param.requires_grad = False
+#             if freeze_layers > 0:
+#                 for i in range(freeze_layers):
+#                     for name, param in self.encoder.named_parameters():
+#                         if f"encoder.layer.{i}." in name:
+#                             param.requires_grad = False
+        
+#         self.classifiers = nn.ModuleList([
+#             onelayer_classifier(pretrained_model.config) for _ in range(self.num_tasks)
+#         ])
+        
+#         multilabel_config = deepcopy(pretrained_model.config)
+#         multilabel_config.num_labels = 25
+#         multilabel_config.classifier_dropout = classifier_dropout
+#         self.multilabel_classifier = onelayer_classifier(multilabel_config)
+        
+#         # self.task_uncertainties = nn.Parameter(torch.ones(self.num_tasks))
+#         # self.phenotype_uncertainties = nn.Parameter(torch.ones(1))
+
+#         # self.task_weights = nn.Parameter(torch.ones(self.num_tasks))
+        
+                
+#     def forward(
+#         self,
+#         input_ids,
+#         value_ids,
+#         unit_ids,
+#         time_ids,
+#         position_ids,
+#         token_type_ids,
+#         ordername_ids,
+#         orderdescription_ids,      
+#         age_ids,
+#         gender_ids,
+#         task_token,
+#         attention_mask=None,
+#         global_attention_mask=None,
+#         # labels=None,
+#         output_attentions=False,
+#         output_hidden_states=True,
+#         return_dict=True,
+#         # criterion=None,
+#     ):
+#         combined_embed = self.embedding(
+#             input_ids=input_ids,
+#             value_ids=value_ids,
+#             unit_ids=unit_ids,
+#             time_ids=time_ids,
+#             position_ids=position_ids,
+#             token_type_ids=token_type_ids,
+#             ordername_ids=ordername_ids,
+#             orderdescription_ids=orderdescription_ids,
+#             age_ids=age_ids,
+#             gender_ids=gender_ids,
+#             task_ids=task_token
+#         )
+        
+#         if global_attention_mask is None:
+#             global_attention = torch.zeros_like(attention_mask)
+#             global_prefix = torch.ones((attention_mask.shape[0], 3)).to(combined_embed.device)
+#             global_attention_mask = torch.cat([global_prefix, global_attention], dim=1)
+        
+#         if attention_mask is None:
+#             attention_mask = torch.ones_like(input_ids)
+#         else:
+#             attention_prefix = torch.ones((attention_mask.shape[0], 3)).to(combined_embed.device)
+#             attention_mask = torch.cat([attention_prefix, attention_mask], dim=1)
+        
+#         # outputs = self.backbone(
+#         #     input_ids=input_ids,
+#         #     value_ids=value_ids,
+#         #     unit_ids=unit_ids,
+#         #     time_ids=time_ids,
+#         #     position_ids=position_ids,
+#         #     token_type_ids=token_type_ids,
+#         #     ordername_ids=ordername_ids,
+#         #     orderdescription_ids=orderdescription_ids,
+#         #     age_ids=age_ids,
+#         #     gender_ids=gender_ids,
+#         #     task_token=task_token,
+#         #     attention_mask=attention_mask,
+#         #     global_attention_mask=global_attention_mask,
+#         #     output_attentions=output_attentions,
+#         #     output_hidden_states=output_hidden_states,
+#         #     return_dict=return_dict,
+#         # )
+#         outputs = self.encoder(
+#             inputs_embeds=combined_embed,
+#             attention_mask=attention_mask,
+#             global_attention_mask=global_attention_mask,
+#             output_attentions=output_attentions,
+#             output_hidden_states=output_hidden_states,
+#             return_dict=return_dict,
+#         )
+        
+#         # Check if gradients are being computed for Layer 5 parameters
+#         # for name, param in self.backbone.encoder.named_parameters():
+#         #     if param.grad is not None:
+#         #         print(f"Gradient for {name}: {param.grad.mean()}")
+#         #     else:
+#         #         print(f"No gradient for {name}")
+        
+
+#         # [CLS] 토큰의 출력만 사용
+#         last_hidden_state = outputs["last_hidden_state"]
+#         attention_mask = attention_mask.float()
+#         masked_hidden = last_hidden_state * attention_mask.unsqueeze(-1)
+#         sum_hidden = masked_hidden.sum(dim=1)
+#         valid_token_counts = attention_mask.sum(dim=1).unsqueeze(-1)
+#         valid_token_counts = valid_token_counts.clamp(min=1)
+        
+#         # cls_output = last_hidden_state[:, 0, :]  # (batch_size, hidden_size)
+#         cls_output = sum_hidden / valid_token_counts  # (batch_size, hidden_size) 
+#         # task_embeds = self.task_embedding_layer(torch.arange(1, self.num_tasks + 1, device=cls_output.device))
+#         # task_embeds = task_embeds.unsqueeze(0).expand(cls_output.size(0), -1, -1)  # (batch_size, num_tasks, hidden_size)
+#         # cls_output_expanded = cls_output.unsqueeze(1).expand(-1, self.num_tasks, -1)
+#         # combined_cls_task = cls_output_expanded + task_embeds
+        
+        
+#         # print(f"cls_output Min: {cls_output.min()}, Max: {cls_output.max()}")
+#         # logits = torch.cat([
+#         #     self.classifiers[i](combined_cls_task[:, i]) for i in range(self.num_tasks)
+#         # ], dim=-1)
+#         # logits = self.classifier(cls_output) # (batch_size, num_labels)
+#         logits = torch.cat([classifier(cls_output).unsqueeze(-1) for classifier in self.classifiers], dim=-1)
+#         # logits = torch.cat([
+#         #     self.classifiers[i](last_hidden_state[:, i, :]).unsqueeze(-1) for i in range(self.num_tasks)
+#         # ], dim=-1)
+        
+#         # phenotype_task_embed = self.task_embedding_layer(torch.tensor([self.num_tasks + 1], device=cls_output.device))
+#         # cls_output_for_multilabel = cls_output + phenotype_task_embed.squeeze(0)
+        
+        
+#         # multilabel_logits = self.multilabel_classifier(last_hidden_state[:, self.num_tasks, :])
+#         multilabel_logits = self.multilabel_classifier(cls_output)
+#         # print(f"Logits Min: {logits.min()}, Max: {logits.max()}")
+        
+#         return {
+#             "logits": logits,
+#             "multilabel_logits": multilabel_logits,
+#             "hidden_states": outputs.hidden_states,
+#         }
+        
+
+# class Adapter(nn.Module):
+#     def __init__(self, hidden_size, bottleneck_size=64):
+#         super().__init__()
+#         self.down_proj = nn.Linear(hidden_size, bottleneck_size)
+#         self.activation = nn.ReLU()
+#         self.up_proj = nn.Linear(bottleneck_size, hidden_size)
+
+#     def forward(self, x):
+#         return x + self.up_proj(self.activation(self.down_proj(x)))
 
 class onelayer_classifier(nn.Module):
     def __init__(self, config):
@@ -589,6 +1320,16 @@ class two_layer_classifier(nn.Module):
         return logits
 
     
+# class Adapter(nn.Module):
+#     def __init__(self, hidden_size, bottleneck_size=32):
+#         super().__init__()
+#         self.down = nn.Linear(hidden_size, bottleneck_size)
+#         self.act = nn.GELU()
+#         self.up = nn.Linear(bottleneck_size, hidden_size)
+
+#     def forward(self, x):
+#         return x + self.up(self.act(self.down(x)))
+
 class Adapter(nn.Module):
     def __init__(self, hidden_size=512, bottleneck_size=32):
         super().__init__()
@@ -715,9 +1456,6 @@ class LongformerFinetuneforMultiTask(nn.Module):
         #     Adapter(self.config.hidden_size) for _ in range(self.num_tasks)
         # ])
         
-        # --------- Classifier/Pooling ---------
-        self.shared_pool = ScaledAttentionPooling(self.config.hidden_size, attn_dropout=classifier_dropout)
-        
    
         self.binary_classifiers = nn.ModuleList([
             onelayer_classifier(pretrained_model.config) for _ in range(self.num_binary_tasks)
@@ -747,9 +1485,9 @@ class LongformerFinetuneforMultiTask(nn.Module):
         # ])
         # self.phenotype_pool = ScaledAttentionPooling(self.config.hidden_size, attn_dropout=classifier_dropout)
 
-        # self.shared_pool = ScaledAttentionPooling(
-        #         self.config.hidden_size, attn_dropout=classifier_dropout
-        #     )
+        self.shared_pool = ScaledAttentionPooling(
+                self.config.hidden_size, attn_dropout=classifier_dropout
+            )
         
         # if getattr(args, "task", None) == "phenotype":
         #     for i, clf in enumerate(self.binary_classifiers):
@@ -822,9 +1560,9 @@ class LongformerFinetuneforMultiTask(nn.Module):
                 
         elif getattr(args, "selected_data", None) == 'P12':
             if args.window == 24:
-                allowed = [1]
+                allowed = [1, 4, 5, 9]
             elif args.window == 48:
-                allowed = [1]
+                allowed = [1, 4, 5]
             for i, clf in enumerate(self.binary_classifiers):
                 if i not in allowed:
                     for p in clf.parameters():
@@ -841,6 +1579,9 @@ class LongformerFinetuneforMultiTask(nn.Module):
                 if i not in allowed:
                     for p in clf.parameters():
                         p.requires_grad = False
+                        
+            for p in self.phenotype_classifier.parameters():
+                p.requires_grad = False
   
         
     def forward(self, input_ids, value_ids, unit_ids, time_ids, position_ids,
@@ -882,15 +1623,6 @@ class LongformerFinetuneforMultiTask(nn.Module):
 
         # --- shared pooling representation ---
         cls_output = self.shared_pool(last_hidden_state, bool_mask)
-        
-        # cls 
-        # cls_output = last_hidden_state[:, 0, :]
-        
-        # # mean pooling
-        # mask = bool_mask.unsqueeze(-1).expand(last_hidden_state.size()).float()  # [B, S, H]
-        # sum_embeddings = torch.sum(last_hidden_state * mask, dim=1)               # [B, H]
-        # sum_mask = torch.clamp(mask.sum(dim=1), min=1e-9)
-        # cls_output = sum_embeddings / sum_mask        
 
         binary_logits = sofa_logits = phenotype_logits = None
 
@@ -916,7 +1648,7 @@ class LongformerFinetuneforMultiTask(nn.Module):
             phenotype_logits = None  
             
         elif getattr(self.args, "selected_data", None) == 'P12':
-            allowed = [1]
+            allowed = [1, 4, 5, 9]
             binary_logits = torch.cat([
                 self.binary_classifiers[i](cls_output).unsqueeze(-1) for i in allowed
             ], dim=-1)
@@ -931,7 +1663,7 @@ class LongformerFinetuneforMultiTask(nn.Module):
             sofa_logits = torch.stack([
                 clf(cls_output) for clf in self.sofa_classifiers
             ], dim=1)
-            phenotype_logits = self.phenotype_classifier(cls_output)
+            phenotype_logits = None
         
         else:
             binary_logits = torch.cat([
@@ -987,7 +1719,6 @@ class LongformerFinetuneforMultiTask_lora(nn.Module):
             ablation=ablation,
             use_itemid=True,
             inputs_embeds=None,
-            args=args,
         )
 
 
@@ -1006,7 +1737,9 @@ class LongformerFinetuneforMultiTask_lora(nn.Module):
         # --------- LoRA (attention/FFN) ---------
         self.use_lora = bool(getattr(self.args, "use_lora", False))
         if self.use_lora:
-            target_modules = ["query", "key", "value"]
+            target_modules = [
+                "query", "value"
+            ]
             lora_cfg = LoraConfig(
                 r=getattr(self.args, "lora_r", 8),
                 lora_alpha=getattr(self.args, "lora_alpha", 16),
@@ -1180,61 +1913,42 @@ class LongformerFinetuneforMultiTask_lora(nn.Module):
         # 5) Heads & gating
         binary_logits = sofa_logits = phenotype_logits = None
 
-
         if getattr(self.args, "window", None) == 0:
-            binary_logits = torch.cat([
-                self.binary_classifiers[0](cls_output).unsqueeze(-1),
-                self.binary_classifiers[6](cls_output).unsqueeze(-1)
-            ], dim=-1)
-
+            # binary: [0, 6]
+            b0 = self.binary_classifiers[0](cls_output).unsqueeze(-1)
+            b6 = self.binary_classifiers[6](cls_output).unsqueeze(-1)
+            binary_logits = torch.cat([b0, b6], dim=-1)
+            # sofa 
             sofa_logits = None
-
+            # phenotype 
             phenotype_logits = self.phenotype_classifier(cls_output)
-            
+
         elif getattr(self.args, "selected_data", None) == "hirid":
             allowed = [2, 4, 5, 7, 8, 9, 10]
-            binary_logits = torch.cat([
-                self.binary_classifiers[i](cls_output).unsqueeze(-1) for i in allowed
-            ], dim=-1)
-            sofa_logits = torch.stack([
-                clf(cls_output) for clf in self.sofa_classifiers
-            ], dim=1)
-            phenotype_logits = None  
-            
-        elif getattr(self.args, "selected_data", None) == 'P12':
-            allowed = [1]
-            binary_logits = torch.cat([
-                self.binary_classifiers[i](cls_output).unsqueeze(-1) for i in allowed
-            ], dim=-1)
-            sofa_logits = None
+            binary_logits = torch.cat(
+                [self.binary_classifiers[i](cls_output).unsqueeze(-1) for i in allowed],
+                dim=-1,
+            )
+            # sofa 
+            sofa_logits = torch.stack([clf(cls_output) for clf in self.sofa_classifiers], dim=1)
+            # phenotype
             phenotype_logits = None
-            
-        elif getattr(self.args, "selected_data", None) == 'eicu':
-            allowed = [i for i in range(2, 11)]
-            binary_logits = torch.cat([
-                self.binary_classifiers[i](cls_output).unsqueeze(-1) for i in allowed
-            ], dim=-1)
-            sofa_logits = torch.stack([
-                clf(cls_output) for clf in self.sofa_classifiers
-            ], dim=1)
-            phenotype_logits = self.phenotype_classifier(cls_output)
-        
+
         else:
-            binary_logits = torch.cat([
-                clf(cls_output).unsqueeze(-1) for clf in self.binary_classifiers
-            ], dim=-1)
-            sofa_logits = torch.stack([
-                clf(cls_output) for clf in self.sofa_classifiers
-            ], dim=1)
+            #  binary/sofa/phenotype 
+            binary_logits = torch.cat(
+                [clf(cls_output).unsqueeze(-1) for clf in self.binary_classifiers],
+                dim=-1,
+            )
+            sofa_logits = torch.stack([clf(cls_output) for clf in self.sofa_classifiers], dim=1)
             phenotype_logits = self.phenotype_classifier(cls_output)
-            
 
         return {
             "binary_logits": binary_logits,
             "sofa_logits": sofa_logits,
             "phenotype_logits": phenotype_logits,
-            "hidden_states": outputs.hidden_states,
-            "cls_output": cls_output
+            "hidden_states": outputs.hidden_states if return_dict else None,
+            "cls_output": cls_output,
         }
 
 class LongformerFinetuneforSingleTask(nn.Module):
@@ -1434,3 +2148,381 @@ class LongformerFinetuneforPhenotype(nn.Module):
         }
         
         
+        
+        
+        
+        
+        
+# class LongformerFinetuneforMultiTask(nn.Module):
+#     def __init__(self, pretrained_model, num_labels, num_binary_tasks=10, num_sofa_tasks=5,
+#                  classifier_dropout=0.1, freeze_pretrained=True,
+#                  freeze_layers=0, ablation=None, args=None):
+#         super().__init__()
+#         self.config = pretrained_model.config
+#         self.num_labels = num_labels
+#         self.num_binary_tasks = num_binary_tasks
+#         self.num_sofa_tasks = num_sofa_tasks
+#         self.num_basetask_tasks = args.num_basetask_tasks
+#         self.num_intervention_tasks = args.num_intervention_tasks
+
+#         self.embedding = EHREmbedding_finetune(
+#             config=self.config,
+#             itemid_size=args.itemid_size,
+#             unit_size=args.unit_size,
+#             max_age=args.max_age,
+#             max_len=args.max_position_embeddings,
+#             gender_size=args.gender_size,
+#             task_size=args.task_size,
+#             name_size=args.name_size,
+#             description_size=args.description_size,
+#             token_type_size=args.token_type_size,
+#             ablation=ablation,
+#             use_itemid=True,
+#             inputs_embeds=None,
+#         )
+
+#         self.encoder = pretrained_model.encoder
+
+#         for param in self.encoder.embeddings.parameters():
+#             param.requires_grad = False
+
+#         if hasattr(self.encoder, "pooler"):
+#             self.encoder.pooler = None
+
+#         if freeze_pretrained:
+#             for name, param in self.embedding.named_parameters():
+#                 param.requires_grad = False
+#             if freeze_layers > 0:
+#                 for i in range(freeze_layers):
+#                     for name, param in self.encoder.named_parameters():
+#                         if f"encoder.layer.{i}." in name:
+#                             param.requires_grad = False
+
+#         # self.adapters = nn.ModuleList([
+#         #     Adapter(self.config.hidden_size) for _ in range(self.num_tasks)
+#         # ])
+        
+#         self.task_group = args.task_group
+        
+#         if self.task_group == "basetask":
+#             self.classifier = nn.ModuleList([
+#                 onelayer_classifier(pretrained_model.config) for _ in range(self.num_basetask_tasks)
+#             ])
+
+        
+#         elif self.task_group == "intervention":
+#             self.classifier = nn.ModuleList([
+#                 onelayer_classifier(pretrained_model.config) for _ in range(self.num_intervention_tasks)
+#             ])
+            
+#         elif self.task_group == "sofa+shock":
+            
+#             sofa_config = deepcopy(pretrained_model.config)
+#             sofa_config.num_labels = args.num_multiclass_labels
+#             sofa_config.classifier_dropout = classifier_dropout
+            
+#             self.sofa_classifier = nn.ModuleList([
+#                 onelayer_classifier(sofa_config) for _ in range(self.num_sofa_tasks)
+#             ])
+            
+#             self.shock_classifier = onelayer_classifier(pretrained_model.config)
+        
+#         elif self.task_group == "phenotype":
+#             phenotype_config = deepcopy(pretrained_model.config)
+#             phenotype_config.num_labels = 25
+#             phenotype_config.classifier_dropout = classifier_dropout
+#             self.phenotype_classifier = onelayer_classifier(phenotype_config)
+        
+#         elif self.task_group == "multitask":
+#             self.binary_classifiers = nn.ModuleList([
+#                 onelayer_classifier(pretrained_model.config) for _ in range(self.num_binary_tasks)
+#             ])
+            
+#             sofa_config = deepcopy(pretrained_model.config)
+#             sofa_config.num_labels = args.num_multiclass_labels
+#             sofa_config.classifier_dropout = classifier_dropout
+            
+#             self.sofa_classifiers = nn.ModuleList([
+#                 onelayer_classifier(sofa_config) for _ in range(self.num_sofa_tasks)
+#             ])
+
+#             phenotype_config = deepcopy(pretrained_model.config)
+#             phenotype_config.num_labels = 25
+#             phenotype_config.classifier_dropout = classifier_dropout
+#             self.phenotype_classifier = onelayer_classifier(phenotype_config)
+
+#     def forward(self, input_ids, value_ids, unit_ids, time_ids, position_ids,
+#                 token_type_ids, ordername_ids, orderdescription_ids, age_ids,
+#                 gender_ids, task_token, attention_mask=None,
+#                 global_attention_mask=None, output_attentions=False,
+#                 output_hidden_states=True, return_dict=True):
+
+#         combined_embed = self.embedding(
+#             input_ids=input_ids, value_ids=value_ids, unit_ids=unit_ids,
+#             time_ids=time_ids, position_ids=position_ids,
+#             token_type_ids=token_type_ids, ordername_ids=ordername_ids,
+#             orderdescription_ids=orderdescription_ids, age_ids=age_ids,
+#             gender_ids=gender_ids, task_ids=task_token
+#         )
+
+#         if global_attention_mask is None:
+#             global_attention = torch.zeros_like(attention_mask)
+#             global_prefix = torch.ones((attention_mask.shape[0], 3)).to(combined_embed.device)
+#             global_attention_mask = torch.cat([global_prefix, global_attention], dim=1)
+
+#         if attention_mask is None:
+#             attention_mask = torch.ones_like(input_ids)
+#         else:
+#             attention_prefix = torch.ones((attention_mask.shape[0], 3)).to(combined_embed.device)
+#             attention_mask = torch.cat([attention_prefix, attention_mask], dim=1)
+
+#         outputs = self.encoder(
+#             inputs_embeds=combined_embed,
+#             attention_mask=attention_mask,
+#             global_attention_mask=global_attention_mask,
+#             output_attentions=output_attentions,
+#             output_hidden_states=output_hidden_states,
+#             return_dict=return_dict,
+#         )
+
+#         last_hidden_state = outputs["last_hidden_state"]
+#         attention_mask = attention_mask.float()
+#         masked_hidden = last_hidden_state * attention_mask.unsqueeze(-1)
+#         sum_hidden = masked_hidden.sum(dim=1)
+#         valid_token_counts = attention_mask.sum(dim=1).unsqueeze(-1).clamp(min=1)
+#         cls_output = sum_hidden / valid_token_counts
+        
+#         if self.task_group == "basetask":
+#             logits = torch.cat([
+#                 self.classifier[i](cls_output).unsqueeze(-1)
+#                 for i in range(self.num_basetask_tasks)
+#             ], dim=-1)
+#             return {
+#                 "binary_logits": logits,
+#                 "hidden_states": outputs.hidden_states,
+#             }
+#         elif self.task_group == "intervention":
+#             logits = torch.cat([
+#                 self.classifier[i](cls_output).unsqueeze(-1)
+#                 for i in range(self.num_intervention_tasks)
+#             ], dim=-1)
+#             return {
+#                     "binary_logits": logits,
+#                     "hidden_states": outputs.hidden_states,
+#                     }
+            
+
+#         elif self.task_group == "sofa+shock":
+#             sofa_logits = torch.stack([
+#             clf(cls_output) for clf in self.sofa_classifier
+#         ], dim=1)
+#             shock_logits = self.shock_classifier(cls_output).unsqueeze(-1)
+#             return {
+#                 "binary_logits": shock_logits,
+#                 "sofa_logits": sofa_logits,
+#                 "hidden_states": outputs.hidden_states,
+#             }
+#         elif self.task_group == "phenotype":
+#             logits = self.phenotype_classifier(cls_output).unsqueeze(-1)
+#             return {
+#                 "phenotype_logits": logits,
+#                 "hidden_states": outputs.hidden_states,
+#             }
+#         elif self.task_group == "multitask":
+#             binary_logits = torch.cat([
+#                 self.binary_classifiers[i](cls_output).unsqueeze(-1)
+#                 for i in range(self.num_binary_tasks)
+#             ], dim=-1)
+
+#             sofa_logits = torch.stack([
+#                 clf(cls_output) for clf in self.sofa_classifiers
+#             ], dim=1)
+        
+#             phenotype_logits = self.phenotype_classifier(cls_output)
+
+        
+#             return {
+#                     "binary_logits": binary_logits,
+#                     "sofa_logits": sofa_logits,
+#                     "phenotype_logits": phenotype_logits,
+#                     "hidden_states": outputs.hidden_states,
+#                 }        
+
+# class Adapter(nn.Module):
+#     def __init__(self, hidden_size, bottleneck_size=128):
+#         super().__init__()
+#         self.down = nn.Linear(hidden_size, bottleneck_size)
+#         self.act = nn.GELU()
+#         self.up = nn.Linear(bottleneck_size, hidden_size)
+
+#     def forward(self, x):
+#         return x + self.up(self.act(self.down(x)))
+
+# class AdapterClassifier(nn.Module):
+#     def __init__(self, adapter, classifier):
+#         super().__init__()
+#         self.adapter = adapter
+#         self.classifier = classifier
+
+#     def forward(self, x):
+#         x = self.adapter(x)
+#         return self.classifier(x)
+
+# class two_layer_classifier(nn.Module):
+#     def __init__(self, config):
+#         super().__init__()
+#         self.dropout = nn.Dropout(config.classifier_dropout)
+#         self.dense1 = nn.Linear(config.hidden_size, config.hidden_size // 2)
+#         self.act = nn.GELU()
+#         self.dense2 = nn.Linear(config.hidden_size // 2, config.num_labels)
+
+#     def forward(self, x):
+#         x = self.dropout(x)
+#         x = self.dense1(x)
+#         x = self.act(x)
+#         x = self.dropout(x)
+#         return self.dense2(x)
+
+# class LongformerFinetuneforMultiTask(nn.Module):
+#     def __init__(self, pretrained_model, num_labels, num_binary_tasks=10, num_sofa_tasks=5,
+#                  classifier_dropout=0.1, freeze_pretrained=True, freeze_layers=0, ablation=None, args=None):
+#         super().__init__()
+#         self.config = pretrained_model.config
+#         self.num_labels = num_labels
+#         self.num_binary_tasks = num_binary_tasks
+#         self.num_sofa_tasks = num_sofa_tasks
+
+#         self.embedding = EHREmbedding_finetune(
+#             config=self.config,
+#             itemid_size=args.itemid_size,
+#             unit_size=args.unit_size,
+#             max_age=args.max_age,
+#             max_len=args.max_position_embeddings,
+#             gender_size=args.gender_size,
+#             task_size=args.task_size,
+#             name_size=args.name_size,
+#             description_size=args.description_size,
+#             token_type_size=args.token_type_size,
+#             ablation=ablation,
+#             use_itemid=True,
+#             inputs_embeds=None,
+#         )
+
+#         self.encoder = pretrained_model.encoder
+
+#         for param in self.encoder.embeddings.parameters():
+#             param.requires_grad = False
+
+#         if hasattr(self.encoder, "pooler"):
+#             self.encoder.pooler = None
+
+#         if freeze_pretrained:
+#             for name, param in self.embedding.named_parameters():
+#                 param.requires_grad = False
+#             if freeze_layers > 0:
+#                 for i in range(freeze_layers):
+#                     for name, param in self.encoder.named_parameters():
+#                         if f"encoder.layer.{i}." in name:
+#                             param.requires_grad = False
+
+#         # 어댑터 그룹 정의
+#         self.adapters = nn.ModuleDict({
+#             "mortality": Adapter(self.config.hidden_size),
+#             "intervention": Adapter(self.config.hidden_size),
+#             "shock": Adapter(self.config.hidden_size),
+#             "los": Adapter(self.config.hidden_size),
+#             "sofa": Adapter(self.config.hidden_size),
+#             "phenotype": Adapter(self.config.hidden_size),
+#         })
+
+#         mortality_ids = [0, 1, 2, 3] 
+#         los_ids = [4, 5]
+#         readmit_id = [6]
+#         intervention_ids = [7, 8, 9]
+#         shock_id = [10]
+
+#         self.binary_classifiers = nn.ModuleList()
+#         for i in range(self.num_binary_tasks):
+#             if i in mortality_ids + readmit_id:
+#                 group = "mortality"
+#             elif i in los_ids:
+#                 group = "los"
+#             elif i in intervention_ids:
+#                 group = "intervention"
+#             elif i in shock_id:
+#                 group = "shock"
+#             else:
+#                 raise ValueError("Unknown binary task ID")
+
+#             classifier = two_layer_classifier(self.config)
+#             self.binary_classifiers.append(AdapterClassifier(self.adapters[group], classifier))
+
+#         # SOFA
+#         sofa_config = deepcopy(self.config)
+#         sofa_config.num_labels = args.num_multiclass_labels
+#         sofa_config.classifier_dropout = classifier_dropout
+#         self.sofa_classifiers = nn.ModuleList([
+#             AdapterClassifier(self.adapters["sofa"], two_layer_classifier(sofa_config))
+#             for _ in range(self.num_sofa_tasks)
+#         ])
+
+#         # Phenotype
+#         phenotype_config = deepcopy(self.config)
+#         phenotype_config.num_labels = 25
+#         phenotype_config.classifier_dropout = classifier_dropout
+#         self.phenotype_classifier = AdapterClassifier(self.adapters["phenotype"], two_layer_classifier(phenotype_config))
+
+#     def forward(self, input_ids, value_ids, unit_ids, time_ids, position_ids,
+#                 token_type_ids, ordername_ids, orderdescription_ids, age_ids,
+#                 gender_ids, task_token, attention_mask=None,
+#                 global_attention_mask=None, output_attentions=False,
+#                 output_hidden_states=True, return_dict=True):
+
+#         combined_embed = self.embedding(
+#             input_ids=input_ids, value_ids=value_ids, unit_ids=unit_ids,
+#             time_ids=time_ids, position_ids=position_ids,
+#             token_type_ids=token_type_ids, ordername_ids=ordername_ids,
+#             orderdescription_ids=orderdescription_ids, age_ids=age_ids,
+#             gender_ids=gender_ids, task_ids=task_token
+#         )
+
+#         if global_attention_mask is None:
+#             global_attention = torch.zeros_like(attention_mask)
+#             global_prefix = torch.ones((attention_mask.shape[0], 3)).to(combined_embed.device)
+#             global_attention_mask = torch.cat([global_prefix, global_attention], dim=1)
+
+#         if attention_mask is None:
+#             attention_mask = torch.ones_like(input_ids)
+#         else:
+#             attention_prefix = torch.ones((attention_mask.shape[0], 3)).to(combined_embed.device)
+#             attention_mask = torch.cat([attention_prefix, attention_mask], dim=1)
+
+#         outputs = self.encoder(
+#             inputs_embeds=combined_embed,
+#             attention_mask=attention_mask,
+#             global_attention_mask=global_attention_mask,
+#             output_attentions=output_attentions,
+#             output_hidden_states=output_hidden_states,
+#             return_dict=return_dict,
+#         )
+
+#         last_hidden_state = outputs["last_hidden_state"]
+#         cls_output = last_hidden_state[:, 0, :]  # or use mean pooling if desired
+
+#         binary_logits = torch.cat([
+#             clf(cls_output).unsqueeze(-1)
+#             for clf in self.binary_classifiers
+#         ], dim=-1)
+
+#         sofa_logits = torch.stack([
+#             clf(cls_output) for clf in self.sofa_classifiers
+#         ], dim=1)
+
+#         phenotype_logits = self.phenotype_classifier(cls_output)
+
+#         return {
+#             "binary_logits": binary_logits,
+#             "sofa_logits": sofa_logits,
+#             "phenotype_logits": phenotype_logits,
+#             "hidden_states": outputs.hidden_states,
+#         }

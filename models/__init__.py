@@ -1,6 +1,7 @@
 # from .longformer import *
 
 from models.embedding import EHREmbedding
+from models.embedding import *
 
 # from models.model import LongformerPretrain, LongformerFinetune
 

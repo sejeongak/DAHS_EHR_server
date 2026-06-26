@@ -371,54 +371,6 @@ def configure_optimizers(model, args, n_steps, loss_weighter=None):
 
     return optimizer, scheduler
 
-def configure_optimizers_lora(model, args, n_steps, loss_weighter=None):
-    base_lr = args.learning_rate
-    classifier_lr = args.learning_rate * args.classifier_weight
-
-    lora_params = []
-    classifier_params = []
-
-    for name, param in model.named_parameters():
-        if not param.requires_grad:
-            continue
-
-        if "lora_" in name or "loraA" in name or "loraB" in name:
-            lora_params.append(param)
-        elif "classifier" in name:
-            classifier_params.append(param)
-        else:
-            pass
-
-    assert len(lora_params) > 0, "LoRA params not detected! Check PEFT wrapping."
-    
-    optimizer_grouped_params = [
-        {"params": lora_params, "lr": base_lr, "weight_decay": 0.01},
-        {"params": classifier_params, "lr": classifier_lr, "weight_decay": 0.0},
-    ]
-
-    if loss_weighter is not None:
-        optimizer_grouped_params.append(
-            {"params": loss_weighter.parameters(), "lr": base_lr, "weight_decay": 0.0}
-        )
-
-    optimizer = torch.optim.AdamW(
-        optimizer_grouped_params,
-        lr=base_lr,
-        eps=1e-8,
-        betas=(0.9, 0.98),
-    )
-
-    num_warmup_steps = int(n_steps * 0.2)
-    num_training_steps = n_steps
-
-    scheduler = get_cosine_schedule_with_warmup(
-        optimizer,
-        num_warmup_steps=num_warmup_steps,
-        num_training_steps=num_training_steps
-    )
-
-    return optimizer, scheduler
-
 # def configure_optimizers(model, args, n_steps, loss_weighter=None):
 #     base_lr   = getattr(args, "learning_rate", 5e-5)
 #     use_lora  = bool(getattr(args, "use_lora", False))
@@ -872,7 +824,6 @@ def main(args):
         use_discriminator=args.use_discriminator,
         use_value_prediction=use_value_prediction,
         gpu_mixed_precision=args.gpu_mixed_precision,
-        args=args
     ).to(device)
     
     pretrained_model.config.classifier_dropout = 0.3
@@ -941,6 +892,7 @@ def main(args):
     if args.task == "multitask":
         if args.use_lora:
             print("use lora!!")
+            print(args.selected_data)
             model = LongformerFinetuneforMultiTask_lora(
                 pretrained_model=pretrained_model,
                 num_labels=args.num_labels,
@@ -1186,11 +1138,7 @@ def main(args):
         loss_weighter = None
         
     n_steps = (len(train_loader)) * args.epochs
-    if args.use_lora:
-        print("Using LoRA - different learning rates for different parameter groups")
-        optimizer, scheduler = configure_optimizers_lora(model, args, n_steps, loss_weighter=loss_weighter)
-    else:
-        optimizer, scheduler = configure_optimizers(model, args, n_steps, loss_weighter=loss_weighter)
+    optimizer, scheduler = configure_optimizers(model, args, n_steps, loss_weighter=loss_weighter)
     
     optimizer = accelerator.prepare(optimizer)
     scheduler = scheduler
@@ -1200,8 +1148,6 @@ def main(args):
     # )
     
     print("Task: ", args.task)
-    
-    print("Value Embedding Type: ", args.value_embedding_type)
     
     target = accelerator.unwrap_model(model) if "accelerator" in globals() else model
     
@@ -1221,98 +1167,44 @@ def main(args):
             if p.requires_grad and "lora_" not in name:
                 print(f"HEAD/OTHER: {name} | {tuple(p.shape)}")
                 
+                
+                
     if getattr(args, "external_validation", False):
-        best_model_path  = Path(args.save_path) / f"best_{args.load_exp_name}.pth"
-      
         if args.use_lora:
             head_bundle_path = Path(args.save_path) / f"{args.exp_name}_head_bundle.pth"
-            adapter_dir      = Path(getattr(args, "adapter_dir", "./adapters"))
-            adapter_name     = getattr(args, "adapter_name", getattr(args, "exp_name", "default"))
-            adapter_path     = adapter_dir / adapter_name
-            
+            adapter_dir = Path(getattr(args, "adapter_dir", "./adapters"))
+
+            adapter_name = getattr(args, "adapter_name", None)
+            if adapter_name is None:
+                adapter_name = getattr(args, "exp_name", None)
+
+            if adapter_name is None:
+                raise ValueError("Adapter name must be specified via --adapter_name or --exp_name when using LoRA.")
+
+            adapter_path = adapter_dir / adapter_name
+
             accelerator.unwrap_model(model).eval()
+            unwrapped = accelerator.unwrap_model(model)
 
-        accelerator.wait_for_everyone()
+            unwrapped.encoder.load_adapter(str(adapter_path), adapter_name=adapter_name, is_trainable=False)
+            unwrapped.encoder.set_adapter(adapter_name)
+            print(f"[External Validation] Active adapter: {unwrapped.encoder.active_adapter}")
 
-        # try:
-        #     if hasattr(model, "gradient_checkpointing_disable"):
-        #         model.gradient_checkpointing_disable()
-        # except Exception:
-        #     pass
-        
-
-        if getattr(args, "use_lora", False):
-            try:
-                enc_only = None
-                pretrain_path = getattr(args, "pretrain_path", None)
-                if pretrain_path:
-                    p = Path(pretrain_path)
-                    if not p.exists():
-                        p = Path(args.save_path) / str(pretrain_path)
-                    if p.exists():
-                        base = torch.load(p, map_location=device)
-                        base_state = base.get("model_state_dict", base)
-                        enc_only = {k: v for k, v in base_state.items() if k.startswith("encoder.")}
-                        print(f"[LoRA/Infer] Load encoder from pretrain: {p}")
-                if enc_only is None:
-                    ckpt_best = torch.load(best_model_path, map_location=device)
-                    st_best   = ckpt_best.get("model_state_dict", ckpt_best)
-                    enc_only  = {k: v for k, v in st_best.items() if k.startswith("encoder.")}
-                    print(f"[LoRA/Infer] Load encoder from best ckpt: {best_model_path}")
-
-
-                missing, unexpected = model.load_state_dict(enc_only, strict=False)
-                print(f"[LoRA/Infer] Encoder load done (missing={len(missing)}, unexpected={len(unexpected)})")
-            except Exception as e:
-                logging.error(f"[LoRA/Infer] Base encoder load failed: {e}")
-                raise
-
-            try:
-                unwrapped = accelerator.unwrap_model(model)
-                unwrapped.encoder.load_adapter(str(adapter_path), adapter_name=adapter_name, is_trainable=False)
-                unwrapped.encoder.set_adapter(adapter_name)
-                print(f"[LoRA/Infer] Adapter set: {adapter_name} from {adapter_path}")
-            except Exception as e:
-                logging.error(f"[LoRA/Infer] Adapter load failed: {e}")
-                raise
-
-            try:
-                if head_bundle_path.exists():
-                    bundle  = torch.load(head_bundle_path, map_location=device)
-                    bstate  = bundle.get("model_state_dict", bundle)
-                    missing, unexpected = model.load_state_dict(bstate, strict=False)
-                    print(f"[LoRA/Infer] Head/Pool bundle loaded (missing={len(missing)}, unexpected={len(unexpected)})")
-                else:
-                    ckpt = torch.load(best_model_path, map_location=device)
-                    state = ckpt.get('model_state_dict', ckpt)
-                    filtered = {k: v for k, v in state.items()
-                                if ("lora_" not in k) and (not k.startswith("encoder."))}
-                    missing, unexpected = model.load_state_dict(filtered, strict=False)
-                    print(f"[LoRA/Infer] Fallback: non-encoder/non-LoRA from best ckpt "
-                        f"(missing={len(missing)}, unexpected={len(unexpected)})")
-            except Exception as e:
-                logging.error(f"[LoRA/Infer] Head/Pool load failed: {e}")
-                raise
-
-            active = getattr(accelerator.unwrap_model(model).encoder, "active_adapter", None)
-            print("Active adapter ->", active)
+            if head_bundle_path.exists():
+                bundle = torch.load(head_bundle_path, map_location=device)
+                model.load_state_dict(bundle.get("model_state_dict", bundle), strict=False)
+                print("[External Validation] Head bundle loaded")
 
         else:
-            print("Loading full checkpoint...")
-            model.load_state_dict(torch.load(best_model_path, map_location=device)['model_state_dict'], strict=False)
-            print("Full model loaded from", best_model_path)
-            # if not args.pretrain:
-            #     print("Loading full checkpoint...")
-            #     model.load_state_dict(torch.load(best_model_path, map_location=device)['model_state_dict'])
-            #     print("Full model loaded from", best_model_path)
-            # else:
-            #     print("Based on Pretrain")
-            
-    else:
-        print("Training from base...")
-                
-            
+            # Non-LoRA external validation
+            best_model_path  = Path(args.save_path) / f"best_{args.load_exp_name}.pth"
+            state = torch.load(best_model_path)['model_state_dict']
+            model.load_state_dict(state, strict=False)
+            print("[External Validation] Best model loaded (non-LoRA)")
 
+    else:
+        print("[Training mode] Model is initialized without loading adapters or checkpoints.")
+        pass
         
     
     # print(model)
@@ -1475,7 +1367,6 @@ if __name__ == "__main__":
     parser.add_argument("--lora_dropout", type=float, default=0.05)
     parser.add_argument("--adapter_dir", type=str, default="./adapters")
     parser.add_argument("--adapter_name", type=str, default=None) 
-    parser.add_argument("--value_embedding_type", type=str, default="continuous", choices=["simple", "continuous"])
 
     parser.add_argument(
         "--lora_targets",

@@ -28,14 +28,7 @@ from torch.optim.lr_scheduler import _LRScheduler
 import math
 from torch.nn.utils.rnn import pad_sequence
 import random
-import warnings
-import time
-from transformers import AutoModel, AutoTokenizer
-from torch.nn import SyncBatchNorm
-from transformers import get_cosine_schedule_with_warmup, get_linear_schedule_with_warmup
 
-import os
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 class CosineAnnealingWarmupRestarts(_LRScheduler):
     """
@@ -123,8 +116,8 @@ class CosineAnnealingWarmupRestarts(_LRScheduler):
             param_group['lr'] = lr
 
 
-def configure_optimizers(model, args, n_steps):
-    optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
+def configure_optimizers(model, args):
+    optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate)
     
     for param_group in optimizer.param_groups:
         param_group['initial_lr'] = args.learning_rate
@@ -146,59 +139,26 @@ def configure_optimizers(model, args, n_steps):
     #                             schedulers=[warmup, decay],
     #                             milestones=[n_warmup_steps])
     # scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=500, T_mult=2)
-    # if args.resume:
-    #     scheduler = CosineAnnealingWarmupRestarts(optimizer,
-    #                                             first_cycle_steps=42464//(args.batch_size * args.acc * 2),
-    #                                             cycle_mult=2,
-    #                                             max_lr=0.0001,
-    #                                             min_lr=0.000001,
-    #                                             warmup_steps=42464//(args.batch_size*10),
-    #                                             gamma=0.9,
-    #                                             last_epoch=args.resume_epoch
-    #                                             )
-    # else:
-        # scheduler = CosineAnnealingWarmupRestarts(optimizer,
-        #                                         first_cycle_steps=42464//(args.batch_size * args.acc * 2),
-        #                                         cycle_mult=1.2,
-        #                                         max_lr=1e-4,
-        #                                         min_lr=1e-6,
-        #                                         warmup_steps=42464//(args.batch_size * args.acc * 2 * 5),
-        #                                         gamma=0.9,
-        #                                         )
-    # total_steps = 42464//(args.batch_size * args.acc * 2) * args.epochs # 198
-    # total_steps = 42464 // args.batch_size * args.epochs
-    steps_per_epoch = int(n_steps // (args.acc * args.epochs))
-    # warmup_steps = int(n_steps // args.acc * 0.1)
-    warmup_steps = steps_per_epoch * 3
-    t_0 = steps_per_epoch * 3
-    num_training_steps = int(n_steps // args.acc)
-    # scheduler = get_cosine_schedule_with_warmup(optimizer, 
-    #                                                 num_warmup_steps=warmup_steps, 
-    #                                                 num_training_steps=num_training_steps
-    #                                                 )
-    
-    warmup_scheduler = get_linear_schedule_with_warmup(
-        optimizer,
-        num_warmup_steps=warmup_steps,
-        num_training_steps=num_training_steps
-    )
+    if args.resume:
+        scheduler = CosineAnnealingWarmupRestarts(optimizer,
+                                                first_cycle_steps=2690,
+                                                cycle_mult=1.5,
+                                                max_lr=0.0001,
+                                                min_lr=0.000001,
+                                                warmup_steps=269,
+                                                gamma=0.9,
+                                                last_epoch=args.resume_epoch
+                                                )
+    else:
+        scheduler = CosineAnnealingWarmupRestarts(optimizer,
+                                                first_cycle_steps=2690,
+                                                cycle_mult=1.5,
+                                                max_lr=0.0001,
+                                                min_lr=0.000001,
+                                                warmup_steps=269,
+                                                gamma=0.9,
+                                                )
 
-    main_scheduler = CosineAnnealingWarmRestarts(
-        optimizer,
-        T_0=t_0,  # 3epoch
-        T_mult=1,
-        eta_min=1e-5
-    )
-
-    scheduler = torch.optim.lr_scheduler.SequentialLR(
-        optimizer,
-        schedulers=[warmup_scheduler, main_scheduler],
-        milestones=[warmup_steps]
-    )
-    
-    # print(f"Total steps: {n_steps}", f"update steps: {num_training_steps}", f"Warmup steps: {warmup_steps}")
-    print(f"Total steps: {steps_per_epoch * args.epochs}", f"Warmup steps: {warmup_steps}", f"restart steps: {t_0}")
-        
     return optimizer, {"scheduler": scheduler, "interval": "step"}
 
 # class BucketBatchSampler(Sampler):
@@ -236,14 +196,16 @@ def configure_optimizers(model, args, n_steps):
 #     token_types_padded = pad_sequence(token_types, batch_first=True, padding_value=0)
 #     labels_padded = pad_sequence(labels, batch_first=True, padding_value=-100)
     
+    
 #     return ehr_tensors_padded, attention_masks, torch.stack(ages), torch.stack(genders), values_padded, units_padded, offsets_padded, ons_padded, positions_padded, token_types_padded, torch.stack(task_token), labels_padded
 
+
 def main(args):
-    # start_time = time.time()
-    warnings.filterwarnings('ignore')
+
     accelerator = Accelerator(mixed_precision="fp16" if args.gpu_mixed_precision else "no")
     print(f"Distributed Type: {accelerator.distributed_type}")
 
+    
     device = accelerator.device
 
     save_path = Path(args.save_path) / args.exp_name
@@ -262,16 +224,12 @@ def main(args):
     seed_everything(args.seed)
     
     tokenizer = LongformerTokenizer.from_pretrained("allenai/longformer-base-4096")
-    itemid2idx = pd.read_pickle("datasets/new_label2idx.pkl")
-    unit2idx = pd.read_pickle("datasets/new_unit2idx.pkl")
-    idx2label = pd.read_pickle("datasets/new_idx2label.pkl") ##############
-    # idx2ordername = pd.read_pickle("datasets/new_idx2ordercategoryname.pkl")
-    # idx2orderdescription = pd.read_pickle("datasets/new_idx2ordercategorydescription.pkl")
     
-    # embedding_model = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT").to('cuda')
-    # embedding_tokenizer = AutoTokenizer.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
-    # embedding_map = pd.read_pickle("datasets/clinicalbert_embedding_map.pkl")
-        
+    itemid2idx = pd.read_pickle("datasets/entire_itemid2idx.pkl")
+    unit2idx = pd.read_pickle("datasets/unit2idx.pkl")
+    
+    
+    
     # WandB initialization
     if accelerator.is_local_main_process:
         logging.info("Wandb initialization")
@@ -280,31 +238,18 @@ def main(args):
                    config=args,
                    )
 
+
     # Model
     # device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     # logging.info(f"Device: {device}")
     
-    if args.value_mask_ratio == 0:
-        use_value_prediction = False
-    else:
-        use_value_prediction = True
-    
     logging.info("Setting Model")
-    # model_start_time = time.time()
     model = LongformerPretrainNormal(
-        # idx2label=idx2label, #################
-        # idx2ordername=idx2ordername,
-        # idx2orderdescription=idx2orderdescription,
-        name_size=args.name_size,
-        description_size=args.description_size,
-        token_type_size=args.token_type_size,
         vocab_size=args.vocab_size,
         itemid_size=args.itemid_size,
-        # embedding_tokenizer=embedding_tokenizer,
-        # embedding_model=embedding_model,
-        # embedding_map=embedding_map,
         max_position_embeddings=args.max_position_embeddings,
         unit_size=args.unit_size,
+        continuous_size=args.continuous_size,
         task_size=args.task_size,
         max_age=args.max_age,
         gender_size=args.gender_size,
@@ -314,28 +259,16 @@ def main(args):
         intermediate_size=args.intermediate_size,
         learning_rate=args.learning_rate,
         dropout_prob=args.dropout_prob,
-        loss_factor=args.loss_factor,
-        use_discriminator=args.use_discriminator,
-        use_value_prediction=use_value_prediction,
         gpu_mixed_precision=args.gpu_mixed_precision,
-        # ablation=args.ablation
-        args=args
     ).to(device)
-    # model_end_time = time.time()
-    # print(f"Model setting time: {model_end_time - model_start_time}")
     
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
- 
-    # for name, param in model.named_parameters():
-    #     print(f"Layer: {name} | Size: {param.numel()}")
+    
         
-    print(f"Trainable Parameters: {trainable_params}")
     # DataLoader
     logging.info("Setting Dataset")
     
-    # dataloader_start_time = time.time()
-    train_dataset = EHR_Longformer_Dataset(Path("./datasets/new_data_preparation"), "train", tokenizer, itemid2idx, unit2idx, vocab_size=args.itemid_size, use_itemid=True, mode='pretrain', mask_mode=args.mask_mode, mask_ratio=args.mask_ratio, value_mask_ratio=args.value_mask_ratio)
-    test_dataset = EHR_Longformer_Dataset(Path("./datasets/new_data_preparation"), "test", tokenizer, itemid2idx, unit2idx, vocab_size=args.itemid_size, use_itemid=True, mode='pretrain', mask_mode=args.mask_mode, mask_ratio=args.mask_ratio, value_mask_ratio=args.value_mask_ratio)
+    train_dataset = EHR_Longformer_Dataset(Path("./datasets"), "train", tokenizer, itemid2idx, unit2idx, use_itemid=True)
+    valid_dataset = EHR_Longformer_Dataset(Path("./datasets"), "valid", tokenizer, itemid2idx, unit2idx, use_itemid=True)
     
     # train_sampler = BucketBatchSampler(train_dataset, args.batch_size)
     # valid_sampler = BucketBatchSampler(valid_dataset, args.batch_size)
@@ -352,48 +285,27 @@ def main(args):
     #                           num_workers=args.num_workers,
     #                           pin_memory=args.pin_memory)
     
-    
-    
-    def custom_collate_fn(batch):
-        return tuple(torch.stack(samples, dim=0) for samples in zip(*batch))
-
-
 
     train_loader = DataLoader(train_dataset, 
                             batch_size=args.batch_size,
                             shuffle=True,  # shuffle should be False if using DistributedSampler
                             # sampler=train_sampler,
-                            # pin_memory=args.pin_memory, 
+                            pin_memory=args.pin_memory, 
                             num_workers=args.num_workers,
-                            # persistent_workers=True,
-                            drop_last=True,
-                            collate_fn=custom_collate_fn
                             )
 
-    test_loader = DataLoader(test_dataset, 
+    valid_loader = DataLoader(valid_dataset, 
                             batch_size=args.batch_size, 
                             shuffle=False,  # Validation should not be shuffled
                             # sampler=valid_sampler,
-                            # pin_memory=args.pin_memory, 
+                            pin_memory=args.pin_memory, 
                             num_workers=args.num_workers,
-                            # persistent_workers=True,
-                            drop_last=True,
-                            collate_fn=custom_collate_fn
                             )
-    # dataloader_end_time = time.time()
-    # print(f"DataLoader setting time: {dataloader_end_time - dataloader_start_time}")
-    print("train_dataset: ", len(train_dataset))
-    print("test_dataset: ", len(test_dataset))
-    print("train_loader: ", len(train_loader))
-    print("test_loader: ", len(test_loader))
+
     
-    if accelerator.is_local_main_process:
-        for name, p in model.named_parameters():
-            if p.requires_grad:
-                print(f"TRAINABLE: {name} | shape={tuple(p.shape)} | numel={p.numel():,}")
-                
-          
-    
+    # Optimizer, Scheduler, Gradient Scaler
+    # n_steps = (len(train_dataset) // args.batch_size) * args.epochs
+    optimizer, scheduler = configure_optimizers(model, args,)
     
     if args.resume:
         checkpoint_path = f"./results/best_pretrain_model_after_masking_{args.resume_epoch}epoch.pth"
@@ -419,37 +331,27 @@ def main(args):
             
         logging.info(f"Resumed learning rates: {lr}")
         
+
+
     else:
         print("Start from the beggining")
     # scaler = GradScaler(enabled=args.gpu_mixed_precision)
     if accelerator.distributed_type == DistributedType.MULTI_GPU:
-        model = SyncBatchNorm.convert_sync_batchnorm(model)
-        
-    model, train_loader, test_loader  = accelerator.prepare(
-        model, train_loader, test_loader
+        model = torch.nn.parallel.DistributedDataParallel(model, find_unused_parameters=False)
+
+    model, optimizer, train_loader, valid_loader, scheduler = accelerator.prepare(
+        model, optimizer, train_loader, valid_loader, scheduler['scheduler']
     )
     
-    # Optimizer, Scheduler, Gradient Scaler
-    n_steps = (len(train_loader)) * args.epochs
-    optimizer, scheduler = configure_optimizers(model, args, n_steps)
-
-    optimizer = accelerator.prepare(optimizer)
-    scheduler = scheduler["scheduler"]
-    # print(f"Total steps: {(len(train_loader)) * args.epochs}")
-    
-    # similarity_map = pd.read_csv("datasets/itemid_similarities.csv")
-    # idx2itemid = pd.read_pickle("datasets/entire_idx2itemid.pkl")
- 
-    # if args.ablation is not None:
-    #     print(f"Ablation: {args.ablation}")
     
     train(
         device,
         model,
         train_loader,
-        test_loader,
+        valid_loader,
         optimizer,
         scheduler,
+        accelerator.scaler,
         accelerator,
         args.epochs,
         args.start_epoch,
@@ -457,7 +359,11 @@ def main(args):
         args.save_path,
         args
     )
+    
+      
+        
                 
+   
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     
@@ -469,15 +375,13 @@ if __name__ == "__main__":
     
     # Model parameters
     parser.add_argument("--vocab_size", type=int, default=50265)
-    parser.add_argument("--itemid_size", type=int, default=3892)
-    parser.add_argument("--unit_size", type=int, default=81)
+    parser.add_argument("--itemid_size", type=int, default=4016)
+    parser.add_argument("--unit_size", type=int, default=60)
     parser.add_argument("--gender_size", type=int, default=2)
+    parser.add_argument("--continuous_size", type=int, default=3)
     parser.add_argument("--task_size", type=int, default=20)
-    parser.add_argument("--token_type_size", type=int, default=5)
-    parser.add_argument("--name_size", type=int, default=35)
-    parser.add_argument("--description_size", type=int, default=12)
-    parser.add_argument("--max_position_embeddings", type=int, default=10000)
-    parser.add_argument("--max_age", type=int, default=101)
+    parser.add_argument("--max_position_embeddings", type=int, default=5000)
+    parser.add_argument("--max_age", type=int, default=100)
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--pin_memory", type=bool, default=True)
     parser.add_argument("--nodes", type=int, default=1)
@@ -487,8 +391,7 @@ if __name__ == "__main__":
     parser.add_argument("--log_every_n_steps", type=int, default=100)
     parser.add_argument("--acc", type=int, default=8)
     parser.add_argument("--resume_checkpoint", type=str, default=None)
-    parser.add_argument("--weight_decay", type=float, default=0.01)
-    parser.add_argument("--num_workers", type=int, default=8)      
+    parser.add_argument("--num_workers", type=int, default=4)      
     parser.add_argument("--embedding_size", type=int, default=768)
     parser.add_argument("--num_hidden_layers", type=int, default=1)
     parser.add_argument("--num_attention_heads", type=int, default=1)
@@ -498,19 +401,20 @@ if __name__ == "__main__":
     parser.add_argument("--layer_norm_eps", type=float, default=1e-6)
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--gpu_mixed_precision", type=bool, default=True)
-    parser.add_argument("--patience", type=int, default=10)
+    parser.add_argument("--patience", type=int, default=50)
     parser.add_argument("--clip_interval", type=int, default=200)
     parser.add_argument("--resume", type=bool, default=False)
     parser.add_argument("--resume_epoch", type=int, default=0)
-    parser.add_argument("--loss_factor", type=float, default=0.5)
-    parser.add_argument("--mask_mode", type=str, default="mlm")
-    parser.add_argument("--mask_ratio", type=float, nargs='+', default=[0.3, 0.15, 0.3])
-    parser.add_argument("--value_mask_ratio", type=float, default=0.15)
-    parser.add_argument("--use_discriminator", action="store_true", help="Enable discriminator")
-    # parser.add_argument("--ablation", type=str, default=None)
-    parser.add_argument("--value_embedding_type", type=str, default="continuous", choices=["simple", "continuous"])
-    parser.add_argument("--suffix", type=str, default="")
+    parser.add_argument("--loss_alpha", type=float, default=0.5)
+    
+    
+    
     args = parser.parse_args()
     args.attention_window = [512] * args.num_hidden_layers
+
+    
+
+    
     
     main(args=args)
+    
